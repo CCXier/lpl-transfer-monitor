@@ -47,3 +47,4 @@ jobs:
         with:
           commit_message: "自动更新微博快照 [Skip CI]"
           file_pattern: "weibo_snapshot.json"
+          push_options: '--force'
