@@ -1,0 +1,2 @@
+crawl4weibo==0.5.2
+wxpusher
