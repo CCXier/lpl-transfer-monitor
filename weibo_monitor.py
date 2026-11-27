@@ -1,3 +1,4 @@
+import re  # 确保文件最顶部有这行 import
 import json
 import os
 import logging
@@ -10,7 +11,8 @@ def format_with_ai(raw_text):
     """调用 DeepSeek API 将长文转换为播主专属格式"""
     api_key = os.environ.get("LLM_API_KEY")
     if not api_key:
-        return raw_text # 如果没有配置密钥，退回原始文本
+        print("  ⚠️ 未配置 LLM_API_KEY，退回原始文本")
+        return raw_text 
         
     url = "https://api.deepseek.com/chat/completions"
     headers = {
@@ -18,7 +20,6 @@ def format_with_ai(raw_text):
         "Content-Type": "application/json"
     }
     
-    # 核心：给 AI 设定身份和严格的输出模板
     prompt = f"""
     你是一个LPL电竞资讯播主。请从以下微博原文中提取转会信息，并严格按照指定模板输出。
     【微博原文】：{raw_text}
@@ -42,20 +43,31 @@ def format_with_ai(raw_text):
     payload = {
         "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1 # 降低随机性，保证格式严格
+        "temperature": 0.1
     }
     
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=15)
         result = resp.json()
+        
+        # ★ 修复1：防止 API 报错导致程序崩溃
+        if 'choices' not in result:
+            print(f"  ❌ DeepSeek API 返回异常: {result}")
+            return None # 返回 None 表示处理失败，直接跳过
+            
         ai_text = result['choices'][0]['message']['content'].strip()
         
+        # ★ 修复2：清洗 AI 可能自带的 Markdown 代码块符号
+        ai_text = ai_text.replace("```markdown", "").replace("```", "").strip()
+        
         if "无转会信息" in ai_text:
-            return None # 告诉外层，这不是转会消息
+            return None 
+            
         return ai_text
+        
     except Exception as e:
-        print(f"  ⚠️ AI 格式化失败: {e}")
-        return raw_text # 出错就用原文兜底
+        print(f"  ⚠️ AI 请求或解析失败: {e}")
+        return None # 出错就跳过，不要推原文，以免排版错乱
 
 # 关闭底层烦人的 INFO 日志
 logging.getLogger("crawl4weibo").setLevel(logging.WARNING)
@@ -121,7 +133,7 @@ def fetch_club_weibo(club_name, uid):
         print(f"  ❌ [{club_name}] 获取失败: {e}")
         return []
 
-import re  # 确保文件最顶部有这行 import
+
 
 def is_transfer_news(text):
     """
@@ -147,13 +159,13 @@ def is_transfer_news(text):
     return False, "", ""
 
 def push_to_wechat(club_name, weibo_text, weibo_id, matched_keyword):
-    summary_text = weibo_text[:80] + "..." if len(weibo_text) > 80 else weibo_text
+    summary_text = weibo_text
     content = f"**【{club_name} 转会动态】**\n\n{summary_text}\n\n[点击查看微博原文](https://m.weibo.cn/detail/{weibo_id})"
     
     try:
         resp = WxPusher.send_message(
             content=content,
-            summary=f"🚨 {club_name} 疑似官宣：{matched_keyword}",
+            summary=f"📝 {club_name} 转会文案已生成（点击复制）",
             content_type=3,
             uids=[WXPUSHER_UID],
             token=WXPUSHER_TOKEN
@@ -192,12 +204,16 @@ def main():
                 is_transfer, matched_kw, trigger_type = is_transfer_news(weibo['text'])
                 
                 if is_transfer:
-                    print(f"  🔔 {club_name} 发现新微博！触发: {trigger_type} (命中词: {matched_kw})")
-                    # 把 trigger_type 传给推送函数，让微信通知更清晰
-                    push_to_wechat(club_name, weibo['text'], weibo['id'], f"{trigger_type} ({matched_kw})")
-                    new_count += 1
-                else:
-                    print(f"  💤 {club_name} 有新微博，但非转会内容，已忽略。")
+                    print(f"  🔔 {club_name} 发现新微博！触发: {trigger_type}")
+                    
+                    # 让 AI 洗稿
+                    formatted_text = format_with_ai(weibo['text'])
+                    
+                    if formatted_text: # 如果不是 None，说明 AI 确认是转会并排好版了
+                        push_to_wechat(club_name, formatted_text, weibo['id'], f"{trigger_type} ({matched_kw})")
+                        new_count += 1
+                    else:
+                        print(f"  💤 AI 判定非实质性转会变动，已忽略。")
                 
         if new_count == 0 and len(current_weibos) > 0:
             # 如果检查了但没新消息（或者过滤了），这里静默，或者你想看可以打印无新动态
