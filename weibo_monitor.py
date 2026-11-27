@@ -5,18 +5,18 @@ from datetime import datetime
 from wxpusher import WxPusher
 from crawl4weibo import WeiboClient
 
-# 关掉 crawl4weibo 底层烦人的 INFO 日志
+# 关闭底层烦人的 INFO 日志
 logging.getLogger("crawl4weibo").setLevel(logging.WARNING)
 
 # ================= 配置区 =================
-# ★ 修改这里：让 GitHub 在云端注入你的 Token 和 UID
 WXPUSHER_TOKEN = os.environ.get("WXPUSHER_TOKEN")
 WXPUSHER_UID = os.environ.get("WXPUSHER_UID")
 
+# 监控的战队官微 UID (目前是 LPL 的，如果你加了 LCK 可以继续在下面加)
 CLUBS = {
     "AL": "6198774314",
     "BLG": "5926660141",
-    "EDG": "5235726837",
+    "EDG": "7601012575",
     "JDG": "6174976862",
     "LGD": "5035639623",
     "TT": "5625501560",
@@ -27,9 +27,10 @@ CLUBS = {
     "NIP": "6420953344",
     "WBG": "5937903233"
 }
+
 SNAPSHOT_FILE = "weibo_snapshot.json"
 
-# ★ 新增：转会相关的关键词列表
+# 转会相关的关键词列表
 TRANSFER_KEYWORDS = [
     "人员变动", "人员调整", "正式加入", "转会", "离队", 
     "解约", "自由人", "续约", "退役", "上调", "下放",
@@ -65,7 +66,6 @@ def fetch_club_weibo(club_name, uid):
         return []
 
 def is_transfer_news(text):
-    """判断文本中是否包含转会相关的关键词"""
     for keyword in TRANSFER_KEYWORDS:
         if keyword in text:
             return True, keyword
@@ -102,7 +102,7 @@ def main():
             new_snapshot[club_name] = old_snapshot.get(club_name, [])
             continue
             
-        # 首次运行建立快照
+        # 如果是第一次运行
         if club_name not in old_snapshot:
             print(f"  📥 {club_name} 建立初始快照。")
             new_snapshot[club_name] = [w['id'] for w in current_weibos]
@@ -111,21 +111,21 @@ def main():
         old_ids = set(old_snapshot.get(club_name, []))
         new_count = 0
         
+        # 倒序遍历，先推最早的，避免顺序错乱
         for weibo in reversed(current_weibos):
             if weibo['id'] not in old_ids:
-                # 发现新微博，先判断是否包含转会关键词
                 is_transfer, matched_kw = is_transfer_news(weibo['text'])
                 
+                # 【重点】这里用的是正常的判断逻辑
                 if is_transfer:
-                    print(f"  🔔 {club_name} 发现疑似转会官宣！触发词: {matched_kw}")
+                    print(f"  🔔 {club_name} 发现新微博！触发词: {matched_kw}")
                     push_to_wechat(club_name, weibo['text'], weibo['id'], matched_kw)
                     new_count += 1
                 else:
-                    # 如果是日常微博，只打印不推送
                     print(f"  💤 {club_name} 有新微博，但非转会内容，已忽略。")
                 
-        if new_count == 0:
-            # 如果这轮有新微博但都被过滤了，也会走到这里
+        if new_count == 0 and len(current_weibos) > 0:
+            # 如果检查了但没新消息（或者过滤了），这里静默，或者你想看可以打印无新动态
             pass
             
         new_snapshot[club_name] = [w['id'] for w in current_weibos]
