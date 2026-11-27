@@ -2,8 +2,8 @@ name: LPL Transfer Monitor
 
 on:
   schedule:
-    # 每 15 分钟运行一次 (GitHub 可能会稍有延迟)
-    - cron: '*/15 * * * *'
+    # 每 5 分钟运行一次 (GitHub 可能会稍有延迟)
+    - cron: '*/5 * * * *'
   workflow_dispatch: # 允许你手动点击按钮运行
 
 # 必须加这个，允许 Action 修改仓库里的快照文件
