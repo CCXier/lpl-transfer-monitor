@@ -4,6 +4,58 @@ import logging
 from datetime import datetime
 from wxpusher import WxPusher
 from crawl4weibo import WeiboClient
+import requests
+
+def format_with_ai(raw_text):
+    """调用 DeepSeek API 将长文转换为播主专属格式"""
+    api_key = os.environ.get("LLM_API_KEY")
+    if not api_key:
+        return raw_text # 如果没有配置密钥，退回原始文本
+        
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # 核心：给 AI 设定身份和严格的输出模板
+    prompt = f"""
+    你是一个LPL电竞资讯播主。请从以下微博原文中提取转会信息，并严格按照指定模板输出。
+    【微博原文】：{raw_text}
+    
+    【要求】：
+    1. 如果原文没有提到具体选手/教练的变动（比如只是日常微博），请直接输出 "无转会信息"。
+    2. 提取战队名（如WBG）、职位（教练/上单/打野等）、ID、本名。
+    3. 格式必须严格如下（不要加多余的废话）：
+    
+    ■战队名
+    官宣X名[职位][离队/加入]：
+    [职位] [ID]（[本名]）
+
+    ——————分界线——————
+
+    「广播历史」查看转会历史信息。
+    「投喂」猫粮支持播主为爱发电～
+    猫粮免费获取：「我的」 右上角图标「签到活动」
+    """
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1 # 降低随机性，保证格式严格
+    }
+    
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        result = resp.json()
+        ai_text = result['choices'][0]['message']['content'].strip()
+        
+        if "无转会信息" in ai_text:
+            return None # 告诉外层，这不是转会消息
+        return ai_text
+    except Exception as e:
+        print(f"  ⚠️ AI 格式化失败: {e}")
+        return raw_text # 出错就用原文兜底
 
 # 关闭底层烦人的 INFO 日志
 logging.getLogger("crawl4weibo").setLevel(logging.WARNING)
