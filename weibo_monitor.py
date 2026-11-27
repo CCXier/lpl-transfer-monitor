@@ -55,6 +55,10 @@ def fetch_club_weibo(club_name, uid):
         posts = client.get_user_posts(uid, page=1, expand=True)
         weibos = []
         for post in posts[:5]:
+            # 核心修改：如果是视频，直接跳过
+            if getattr(post, 'video_url', None):
+                continue 
+                
             weibos.append({
                 "id": str(post.id),
                 "text": post.text.strip(),
@@ -65,11 +69,30 @@ def fetch_club_weibo(club_name, uid):
         print(f"  ❌ [{club_name}] 获取失败: {e}")
         return []
 
+import re  # 确保文件最顶部有这行 import
+
 def is_transfer_news(text):
+    """
+    判断文本是否包含转会信息。
+    优先检查 #话题#，如果话题没命中，再检查正文。
+    """
+    # 1. 提取所有的话题标签 (匹配两个 # 之间的内容)
+    hashtags = re.findall(r'#([^#]+)#', text)
+    
+    # 2. 检查话题标签中是否命中关键词
+    for tag in hashtags:
+        for keyword in TRANSFER_KEYWORDS:
+            if keyword in tag:
+                # 返回：是否命中, 触发词, 触发方式(用于推送展示)
+                return True, keyword, f"话题: #{tag}#"
+                
+    # 3. 如果话题没命中，退而求其次检查正文（清理掉话题，防止正文被话题误伤）
+    clean_text = re.sub(r'#[^#]+#', '', text)
     for keyword in TRANSFER_KEYWORDS:
-        if keyword in text:
-            return True, keyword
-    return False, ""
+        if keyword in clean_text:
+            return True, keyword, "正文内容"
+            
+    return False, "", ""
 
 def push_to_wechat(club_name, weibo_text, weibo_id, matched_keyword):
     summary_text = weibo_text[:80] + "..." if len(weibo_text) > 80 else weibo_text
@@ -114,12 +137,12 @@ def main():
         # 倒序遍历，先推最早的，避免顺序错乱
         for weibo in reversed(current_weibos):
             if weibo['id'] not in old_ids:
-                is_transfer, matched_kw = is_transfer_news(weibo['text'])
+                is_transfer, matched_kw, trigger_type = is_transfer_news(weibo['text'])
                 
-                # 【重点】这里用的是正常的判断逻辑
                 if is_transfer:
-                    print(f"  🔔 {club_name} 发现新微博！触发词: {matched_kw}")
-                    push_to_wechat(club_name, weibo['text'], weibo['id'], matched_kw)
+                    print(f"  🔔 {club_name} 发现新微博！触发: {trigger_type} (命中词: {matched_kw})")
+                    # 把 trigger_type 传给推送函数，让微信通知更清晰
+                    push_to_wechat(club_name, weibo['text'], weibo['id'], f"{trigger_type} ({matched_kw})")
                     new_count += 1
                 else:
                     print(f"  💤 {club_name} 有新微博，但非转会内容，已忽略。")
